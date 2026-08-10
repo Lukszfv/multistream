@@ -1,0 +1,177 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  padding: var(--gap-md) var(--gap-lg) var(--gap-lg);
+}
+
+.streams-grid {
+  flex: 1;
+  display: grid;
+  gap: var(--gap-md);
+  grid-auto-rows: 1fr;
+  min-height: calc(100vh - var(--navbar-height) - 220px);
+}
+
+.streams-grid .stream-card {
+  min-height: 220px;
+  height: 100%;
+}
+
+.streams-grid[data-count="1"] {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.streams-grid[data-count="2"] {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: 1fr;
+}
+
+.streams-grid[data-count="3"] {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: 1fr;
+}
+
+.streams-grid[data-count="4"] {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.streams-grid[data-count="5"] {
+  grid-template-columns: repeat(6, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+.streams-grid[data-count="5"] .stream-card:nth-child(1) { grid-column: span 2; }
+.streams-grid[data-count="5"] .stream-card:nth-child(2) { grid-column: span 2; }
+.streams-grid[data-count="5"] .stream-card:nth-child(3) { grid-column: span 2; }
+.streams-grid[data-count="5"] .stream-card:nth-child(4) { grid-column: span 3; }
+.streams-grid[data-count="5"] .stream-card:nth-child(5) { grid-column: span 3; }
+
+.streams-grid[data-count="6"] {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.streams-grid[data-count="7"] {
+  grid-template-columns: repeat(12, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+.streams-grid[data-count="7"] .stream-card:nth-child(1) { grid-column: span 3; }
+.streams-grid[data-count="7"] .stream-card:nth-child(2) { grid-column: span 3; }
+.streams-grid[data-count="7"] .stream-card:nth-child(3) { grid-column: span 3; }
+.streams-grid[data-count="7"] .stream-card:nth-child(4) { grid-column: span 3; }
+.streams-grid[data-count="7"] .stream-card:nth-child(5) { grid-column: span 4; }
+.streams-grid[data-count="7"] .stream-card:nth-child(6) { grid-column: span 4; }
+.streams-grid[data-count="7"] .stream-card:nth-child(7) { grid-column: span 4; }
+
+.streams-grid[data-count="8"] {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.streams-grid[data-count="9"] {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+}
+
+.streams-grid[data-count="10"] {
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.streams-grid[data-count="11"] {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+}
+
+.streams-grid[data-count="12"] {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+}
+
+.streams-grid[data-count~="13"],
+.streams-grid.is-overflow {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-auto-rows: minmax(200px, 1fr);
+}
+
+.streams-area.is-focus-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  flex: 1;
+}
+
+.focus-row {
+  display: grid;
+  gap: var(--gap-md);
+  height: 68vh;
+}
+
+.focus-row[data-count="1"] { grid-template-columns: 1fr; }
+.focus-row[data-count="2"] { grid-template-columns: repeat(2, 1fr); }
+.focus-row[data-count="3"] { grid-template-columns: repeat(3, 1fr); }
+.focus-row[data-count="4"] { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
+
+.focus-secondary-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-auto-rows: 140px;
+  gap: var(--gap-sm);
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: var(--gap-sm);
+}
+
+.focus-secondary-row .stream-card {
+  min-height: 140px;
+}
+
+@media (max-width: 900px) {
+  .streams-grid[data-count],
+  .focus-row[data-count] {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: none !important;
+  }
+
+  .streams-grid .stream-card,
+  .focus-row .stream-card {
+    min-height: 220px;
+  }
+
+  .focus-row {
+    height: auto;
+  }
+
+  .add-stream-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .navbar {
+    padding: 0 var(--gap-md);
+  }
+
+  .navbar__title {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .app__main {
+    padding: var(--gap-sm) var(--gap-sm) var(--gap-md);
+  }
+
+  .sidebar {
+    width: 100%;
+    max-width: 100vw;
+  }
+}

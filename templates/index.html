@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MultiStream</title>
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/layout.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/animations.css') }}" />
+</head>
+<body>
+
+  <div class="app">
+    <header class="navbar">
+      <div class="navbar__brand">
+        <div class="navbar__logo">MS</div>
+        <span class="navbar__title">MultiStream</span>
+      </div>
+
+      <div class="navbar__actions">
+        <button id="btn-add-stream" class="btn btn--primary" type="button">
+          <span>＋</span> Adicionar Stream
+        </button>
+
+        <button id="btn-layout" class="btn btn--icon" type="button" title="Salvar / Carregar Layout">
+          ▦
+        </button>
+
+        <button id="btn-settings" class="btn btn--icon" type="button" title="Configurações">
+          ⚙
+        </button>
+
+        <button id="btn-theme" class="btn btn--icon" type="button" title="Alternar Tema">
+          🌙
+        </button>
+      </div>
+    </header>
+
+    <main class="app__main">
+      <section id="add-stream-panel" class="add-stream-panel is-hidden">
+        <form id="add-stream-form" class="add-stream-form">
+          <div class="form-field">
+            <label for="platform-select">Plataforma</label>
+            <select id="platform-select" name="platform">
+              <option value="twitch">Twitch</option>
+              <option value="youtube">YouTube</option>
+              <option value="kick">Kick</option>
+            </select>
+          </div>
+
+          <div class="form-field">
+            <label for="channel-input">Canal</label>
+            <input
+              id="channel-input"
+              name="channel"
+              type="text"
+              placeholder="Nome do canal (ex: gaules)"
+              autocomplete="off"
+              required
+            />
+          </div>
+
+          <button type="submit" class="btn btn--primary">Adicionar</button>
+        </form>
+      </section>
+
+      <section id="streams-area" class="streams-area">
+        <div id="streams-grid" class="streams-grid" data-count="0">
+          <div class="empty-state" id="empty-state">
+            <div class="empty-state__icon">📺</div>
+            <div class="empty-state__title">Nenhuma live adicionada ainda</div>
+            <p class="text-secondary">
+              Clique em "Adicionar Stream" para começar a montar seu multistream.
+            </p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+  <aside id="settings-sidebar" class="sidebar" aria-label="Configurações">
+    <div class="sidebar__header">
+      <span class="sidebar__title">Configurações</span>
+      <button id="btn-close-settings" class="btn btn--icon btn--ghost" type="button">✕</button>
+    </div>
+
+    <div class="sidebar__body">
+
+      <div class="settings-group">
+        <span class="settings-group__title">Aparência</span>
+
+        <div class="settings-row">
+          <span>Tema</span>
+          <select id="setting-theme">
+            <option value="dark">Modo Escuro</option>
+            <option value="blue">Modo Azul</option>
+          </select>
+        </div>
+
+        <div class="settings-row">
+          <span>Idioma</span>
+          <select id="setting-language">
+            <option value="pt-BR">Português (BR)</option>
+            <option value="en-US">English</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <span class="settings-group__title">Reprodução</span>
+
+        <div class="settings-row">
+          <span>Qualidade padrão</span>
+          <select id="setting-quality">
+            <option value="auto">Automática</option>
+            <option value="source">Fonte</option>
+            <option value="1080p60">1080p60</option>
+            <option value="720p60">720p60</option>
+            <option value="480p">480p</option>
+            <option value="160p">160p (economia de dados)</option>
+          </select>
+        </div>
+
+        <div class="settings-row">
+          <span>Auto Mute ao adicionar</span>
+          <label class="switch">
+            <input type="checkbox" id="setting-auto-mute" checked />
+            <span class="switch__track"></span>
+          </label>
+        </div>
+
+        <div class="settings-row">
+          <span>Auto Focus <em class="text-secondary">(em breve)</em></span>
+          <label class="switch">
+            <input type="checkbox" id="setting-auto-focus" disabled />
+            <span class="switch__track"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <span class="settings-group__title">Geral</span>
+
+        <div class="settings-row">
+          <span>Salvar automaticamente</span>
+          <label class="switch">
+            <input type="checkbox" id="setting-auto-save" checked />
+            <span class="switch__track"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <span class="settings-group__title">Layouts salvos</span>
+        <div id="saved-layouts-list" class="saved-layouts">
+        </div>
+        <button id="btn-save-current-layout" class="btn btn--sm" type="button">
+          Salvar layout atual
+        </button>
+      </div>
+
+    </div>
+  </aside>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/players.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/layout.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/focus.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
