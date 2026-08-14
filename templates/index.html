@@ -27,6 +27,10 @@
           ▦
         </button>
 
+        <button id="btn-mute-all" class="btn btn--icon" type="button" title="Mutar / desmutar todas as streams" aria-pressed="false">
+          🔊
+        </button>
+
         <button id="btn-settings" class="btn btn--icon" type="button" title="Configurações">
           ⚙
         </button>
@@ -59,6 +63,9 @@
               autocomplete="off"
               required
             />
+            <span class="form-field__hint text-secondary">
+              Twitch/Kick: nome do canal. YouTube: nome, @usuário, URL do canal ou ID.
+            </span>
           </div>
 
           <button type="submit" class="btn btn--primary">Adicionar</button>
@@ -66,15 +73,18 @@
       </section>
 
       <section id="streams-area" class="streams-area">
-        <div id="streams-grid" class="streams-grid" data-count="0">
-          <div class="empty-state" id="empty-state">
-            <div class="empty-state__icon">📺</div>
-            <div class="empty-state__title">Nenhuma live adicionada ainda</div>
-            <p class="text-secondary">
-              Clique em "Adicionar Stream" para começar a montar seu multistream.
-            </p>
-          </div>
+        <div id="empty-state" class="empty-state">
+          <div class="empty-state__icon">📺</div>
+          <div class="empty-state__title">Nenhuma live adicionada ainda</div>
+          <p class="text-secondary">
+            Clique em "Adicionar Stream" para começar a montar seu multistream.
+          </p>
         </div>
+
+        <div id="streams-grid" class="streams-grid is-hidden" data-count="0"></div>
+
+        <div id="focus-row" class="focus-row is-hidden" data-count="0"></div>
+        <div id="focus-secondary-row" class="focus-secondary-row is-hidden"></div>
       </section>
 
     </main>
@@ -117,13 +127,14 @@
           <span>Qualidade padrão</span>
           <select id="setting-quality">
             <option value="auto">Automática</option>
-            <option value="source">Fonte</option>
-            <option value="1080p60">1080p60</option>
-            <option value="720p60">720p60</option>
+            <option value="1080p">1080p</option>
+            <option value="720p">720p</option>
             <option value="480p">480p</option>
+            <option value="360p">360p</option>
             <option value="160p">160p (economia de dados)</option>
           </select>
         </div>
+        <p id="quality-note" class="settings-note text-secondary"></p>
 
         <div class="settings-row">
           <span>Auto Mute ao adicionar</span>
@@ -165,6 +176,39 @@
 
     </div>
   </aside>
+
+  <div id="edit-modal-overlay" class="modal-overlay is-hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
+      <div class="modal__header">
+        <span id="edit-modal-title" class="modal__title">Editar Stream</span>
+        <button id="btn-close-edit-modal" class="btn btn--icon btn--ghost" type="button">✕</button>
+      </div>
+
+      <form id="edit-stream-form" class="modal__body">
+        <div class="form-field">
+          <label for="edit-platform-select">Plataforma</label>
+          <select id="edit-platform-select" name="platform">
+            <option value="twitch">Twitch</option>
+            <option value="youtube">YouTube</option>
+            <option value="kick">Kick</option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="edit-channel-input">Canal</label>
+          <input id="edit-channel-input" name="channel" type="text" autocomplete="off" required />
+          <span class="form-field__hint text-secondary">
+            Twitch/Kick: nome do canal. YouTube: nome, @usuário, URL do canal ou ID.
+          </span>
+        </div>
+
+        <div class="modal__actions">
+          <button type="button" id="btn-cancel-edit" class="btn">Cancelar</button>
+          <button type="submit" class="btn btn--primary">Salvar alterações</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <div id="toast" class="toast"></div>
 

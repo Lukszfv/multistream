@@ -1,59 +1,184 @@
-from flask import Flask, render_template, jsonify, request
+import re
 from datetime import datetime
+
+import requests
+from flask import Flask, render_template, jsonify, request
 
 app = Flask(__name__)
 
 SUPPORTED_PLATFORMS = ["twitch", "youtube", "kick"]
 
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+}
+
+REQUEST_TIMEOUT = 6  # segundos
+
+
+def _now_iso():
+    return datetime.utcnow().isoformat() + "Z"
+
+
+def _response(platform, channel, found, is_live, title=None, embed_url=None, message=None):
+    return {
+        "platform": platform,
+        "channel": channel,
+        "found": found,
+        "is_live": is_live,
+        "title": title,
+        "embed_url": embed_url,
+        "message": message,
+        "checked_at": _now_iso(),
+    }
+
 def resolve_twitch(channel: str) -> dict:
-    """Resolve um canal da Twitch (mock).
-
-    No futuro: chamar a Twitch Helix API (GET /streams?user_login=...)
-    usando um token de aplicação (Client Credentials Flow).
-    """
-    return {
-        "platform": "twitch",
-        "channel": channel,
-        "is_live": True,
-        "title": f"Live de {channel} (dado fictício)",
-        "embed_url": f"https://player.twitch.tv/?channel={channel}",
-        "thumbnail": None,
-        "checked_at": datetime.utcnow().isoformat() + "Z",
-    }
-
-
-def resolve_youtube(channel: str) -> dict:
-    """Resolve um canal do YouTube (mock).
-
-    No futuro: chamar a YouTube Data API v3 (search.list com
-    eventType=live) para descobrir o videoId da live atual do canal.
-    """
-    return {
-        "platform": "youtube",
-        "channel": channel,
-        "is_live": True,
-        "title": f"Live de {channel} (dado fictício)",
-        "embed_url": f"https://www.youtube.com/embed/live_stream?channel={channel}",
-        "thumbnail": None,
-        "checked_at": datetime.utcnow().isoformat() + "Z",
-    }
-
+    channel = channel.strip().lstrip("@")
+    if not channel:
+        return _response("twitch", channel, found=False, is_live=False,
+                          message="Informe o nome do canal da Twitch.")
+    return _response(
+        "twitch", channel, found=True, is_live=True,
+        title=f"Live de {channel} (dado fictício)",
+        embed_url=f"https://player.twitch.tv/?channel={channel}",
+    )
 
 def resolve_kick(channel: str) -> dict:
-    """Resolve um canal do Kick (mock).
+    channel = channel.strip().lstrip("@")
+    if not channel:
+        return _response("kick", channel, found=False, is_live=False,
+                          message="Informe o nome do canal do Kick.")
+    return _response(
+        "kick", channel, found=True, is_live=True,
+        title=f"Live de {channel} (dado fictício)",
+        embed_url=f"https://player.kick.com/{channel}",
+    )
 
-    No futuro: chamar a API pública/privada do Kick para checar o
-    status da live e obter metadados adicionais.
+YOUTUBE_CHANNEL_ID_RE = re.compile(r"^UC[\w-]{20,}$")
+
+
+def _normalize_youtube_target(raw: str):
+    """Retorna (kind, value):
+      kind = "video" -> value é um video_id já conhecido (link direto)
+      kind = "path"  -> value é o caminho do canal (ex.: "/@canal")
     """
-    return {
-        "platform": "kick",
-        "channel": channel,
-        "is_live": True,
-        "title": f"Live de {channel} (dado fictício)",
-        "embed_url": f"https://player.kick.com/{channel}",
-        "thumbnail": None,
-        "checked_at": datetime.utcnow().isoformat() + "Z",
-    }
+    raw = raw.strip()
+
+    video_match = re.search(
+        r"(?:youtube\.com/(?:watch\?v=|live/)|youtu\.be/)([\w-]{11})", raw
+    )
+    if video_match:
+        return "video", video_match.group(1)
+
+    url_match = re.search(
+        r"youtube\.com/(channel/UC[\w-]{20,}|@[\w.\-]+|c/[\w.\-]+|user/[\w.\-]+)",
+        raw, re.IGNORECASE,
+    )
+    if url_match:
+        return "path", "/" + url_match.group(1)
+
+    if YOUTUBE_CHANNEL_ID_RE.match(raw):
+        return "path", f"/channel/{raw}"
+
+    if raw.startswith("@"):
+        return "path", f"/{raw}"
+
+    return "path", f"/@{raw}"
+
+
+def _fetch_youtube_html(url: str):
+    try:
+        resp = requests.get(url, headers=BROWSER_HEADERS, timeout=REQUEST_TIMEOUT)
+        return resp.status_code, resp.text
+    except requests.RequestException:
+        return None, None
+
+
+def _extract_live_video_id(html: str):
+    if not html:
+        return None
+
+    is_live_now = '"isLiveNow":true' in html or '"isLive":true' in html
+    if not is_live_now:
+        return None
+
+    canonical_match = re.search(
+        r'<link rel="canonical" href="https://www\.youtube\.com/watch\?v=([\w-]{11})"', html
+    )
+    if canonical_match:
+        return canonical_match.group(1)
+
+    video_id_match = re.search(r'"videoId":"([\w-]{11})"', html)
+    if video_id_match:
+        return video_id_match.group(1)
+
+    return None
+
+
+def _extract_title(html: str, fallback: str) -> str:
+    if not html:
+        return fallback
+    title_match = re.search(r"<title>(.*?)</title>", html)
+    if not title_match:
+        return fallback
+    return title_match.group(1).replace(" - YouTube", "").strip() or fallback
+
+
+def resolve_youtube(raw_channel: str) -> dict:
+    raw_channel = raw_channel.strip()
+
+    if not raw_channel:
+        return _response("youtube", raw_channel, found=False, is_live=False,
+                          message="Informe o nome, @usuário, URL ou ID do canal.")
+
+    kind, value = _normalize_youtube_target(raw_channel)
+
+    if kind == "video":
+        return _response(
+            "youtube", raw_channel, found=True, is_live=True,
+            title="Vídeo/Live informado diretamente",
+            embed_url=f"https://www.youtube.com/embed/{value}",
+        )
+
+    live_url = f"https://www.youtube.com{value}/live"
+    status_code, html = _fetch_youtube_html(live_url)
+
+    if status_code is None:
+        return _response(
+            "youtube", raw_channel, found=False, is_live=False,
+            message="Não foi possível conectar ao YouTube para verificar este canal. Tente novamente.",
+        )
+
+    if status_code == 404:
+        return _response(
+            "youtube", raw_channel, found=False, is_live=False,
+            message="Canal do YouTube não encontrado. Verifique o nome, @usuário ou URL informado.",
+        )
+
+    if status_code != 200:
+        return _response(
+            "youtube", raw_channel, found=False, is_live=False,
+            message=f"Não foi possível verificar este canal no momento (status {status_code}). Tente novamente em instantes.",
+        )
+
+    video_id = _extract_live_video_id(html)
+
+    if not video_id:
+        return _response(
+            "youtube", raw_channel, found=True, is_live=False,
+            message="Este canal não está ao vivo.",
+        )
+
+    title = _extract_title(html, fallback=raw_channel)
+
+    return _response(
+        "youtube", raw_channel, found=True, is_live=True,
+        title=title, embed_url=f"https://www.youtube.com/embed/{video_id}",
+    )
+
 
 RESOLVERS = {
     "twitch": resolve_twitch,
@@ -61,22 +186,18 @@ RESOLVERS = {
     "kick": resolve_kick,
 }
 
+
 @app.route("/")
 def index():
-    """Renderiza a página principal da aplicação."""
     return render_template("index.html")
+
 
 @app.route("/api/<platform>", methods=["GET"])
 def resolve_channel(platform: str):
-    """Endpoint genérico de resolução de canal.
+    """GET /api/twitch|youtube|kick?channel=...
 
-    Exemplo de uso:
-        GET /api/twitch?channel=algumcanal
-        GET /api/youtube?channel=algumcanal
-        GET /api/kick?channel=algumcanal
-
-    Retorna um JSON padronizado (ver RESOLVERS acima) contendo a URL
-    de embed pronta para o frontend usar num <iframe>.
+    Sempre retorna 200 com o contrato padronizado (mesmo quando o
+    canal está offline) — 400 é reservado para parâmetros inválidos.
     """
     platform = platform.lower()
 
@@ -87,24 +208,16 @@ def resolve_channel(platform: str):
         }), 400
 
     channel = request.args.get("channel", "").strip()
-
     if not channel:
         return jsonify({"error": "Parâmetro 'channel' é obrigatório."}), 400
 
-    resolver = RESOLVERS[platform]
-    data = resolver(channel)
-
-    return jsonify(data), 200
+    return jsonify(RESOLVERS[platform](channel)), 200
 
 
 @app.route("/api/platforms", methods=["GET"])
 def list_platforms():
-    """Retorna a lista de plataformas atualmente suportadas.
-
-    Útil para o frontend popular dinamicamente o <select> de
-    plataformas sem precisar hardcodar a lista em JS.
-    """
     return jsonify({"platforms": SUPPORTED_PLATFORMS}), 200
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

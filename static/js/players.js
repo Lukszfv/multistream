@@ -3,11 +3,30 @@
 
   window.MSH = window.MSH || {};
 
+  const QUALITY_SUPPORT = {
+    twitch: { supported: false },
+    kick: { supported: false },
+    youtube: { supported: "best-effort" },
+  };
+
+  const YOUTUBE_VQ_MAP = {
+    "1080p": "hd1080",
+    "720p": "hd720",
+    "480p": "large",
+    "360p": "medium",
+    "160p": "tiny",
+  };
+
+  function getQualitySupport(platform) {
+    return QUALITY_SUPPORT[platform] || { supported: false };
+  }
+
   /**
    * Monta a URL de embed definitiva de um player, incluindo os
-   * parâmetros específicos de cada plataforma (mute, parent, autoplay).
+   * parâmetros específicos de cada plataforma (mute, parent, autoplay,
+   * qualidade quando aplicável).
    *
-   * @param {Object} stream - { platform, channel, embedUrl, muted }
+   * @param {Object} stream - { platform, channel, embedUrl, muted, quality }
    * @returns {string}
    */
   function buildEmbedUrl(stream) {
@@ -23,7 +42,10 @@
       case "youtube":
         params.set("autoplay", "1");
         params.set("mute", stream.muted ? "1" : "0");
-        return `${stream.embedUrl}&${params.toString()}`;
+        if (stream.quality && stream.quality !== "auto" && YOUTUBE_VQ_MAP[stream.quality]) {
+          params.set("vq", YOUTUBE_VQ_MAP[stream.quality]);
+        }
+        return `${stream.embedUrl}?${params.toString()}`;
 
       case "kick":
         params.set("muted", stream.muted ? "true" : "false");
@@ -39,8 +61,34 @@
     return `stream-card__platform-badge stream-card__platform-badge--${platform}`;
   }
 
+  function renderPlayerBodyHTML(stream) {
+    if (stream.isLive) {
+      return `
+        <iframe
+          src="${buildEmbedUrl(stream)}"
+          allowfullscreen
+          allow="autoplay; fullscreen"
+          loading="lazy"
+        ></iframe>
+      `;
+    }
+
+    const icon = stream.found === false ? "❓" : "💤";
+    const message = stream.statusMessage || "Este canal não está ao vivo.";
+
+    return `
+      <div class="stream-card__status">
+        <span class="stream-card__status-icon">${icon}</span>
+        <span class="stream-card__status-message">${message}</span>
+        <button class="btn btn--sm" data-action="retry">Verificar novamente</button>
+      </div>
+    `;
+  }
+
   /**
    * Cria o elemento DOM completo de um card de live.
+   * O ID único da stream (ex.: "player-1") fica em `card.dataset.id`
+   * e nunca muda durante o ciclo de vida do card.
    *
    * @param {Object} stream - objeto de estado da live (ver app.js)
    * @returns {HTMLElement}
@@ -54,26 +102,22 @@
     card.innerHTML = `
       <header class="stream-card__header">
         <div class="stream-card__info">
-          <span class="${platformBadgeClass(stream.platform)}"></span>
-          <span class="stream-card__channel" title="${stream.channel}">${stream.channel}</span>
+          <span class="${platformBadgeClass(stream.platform)}" data-role="badge"></span>
+          <span class="stream-card__channel" data-role="channel-name" title="${stream.channel}">${stream.channel}</span>
         </div>
         <div class="stream-card__controls">
           <button class="btn btn--icon" data-action="focus" title="Foco">⭐</button>
           <button class="btn btn--icon" data-action="pin" title="Fixar">📌</button>
           <button class="btn btn--icon" data-action="mute" title="Mutar/Desmutar">🔇</button>
           <button class="btn btn--icon" data-action="chat" title="Mostrar/Esconder Chat">💬</button>
+          <button class="btn btn--icon" data-action="edit" title="Editar">✏️</button>
           <button class="btn btn--icon" data-action="fullscreen" title="Tela cheia">⛶</button>
           <button class="btn btn--icon btn--danger" data-action="remove" title="Remover">✕</button>
         </div>
       </header>
 
-      <div class="stream-card__player">
-        <iframe
-          src="${buildEmbedUrl(stream)}"
-          allowfullscreen
-          allow="autoplay; fullscreen"
-          loading="lazy"
-        ></iframe>
+      <div class="stream-card__player" data-role="player">
+        ${renderPlayerBodyHTML(stream)}
       </div>
 
       <div class="stream-card__chat-panel">
@@ -88,6 +132,11 @@
     return card;
   }
 
+  /**
+   * Sincroniza classes/ícones visuais do card (pinado, focado, mutado)
+   * com o estado atual do objeto stream. Não toca no <iframe> — pode
+   * ser chamado livremente sem causar reload de player.
+   */
   function applyStateClasses(cardEl, stream) {
     cardEl.classList.toggle("is-pinned", !!stream.pinned);
     cardEl.classList.toggle("is-focused-active", !!stream.focused);
@@ -99,28 +148,42 @@
     }
 
     const pinBtn = cardEl.querySelector('[data-action="pin"]');
-    if (pinBtn) {
-      pinBtn.classList.toggle("is-active", !!stream.pinned);
-    }
+    if (pinBtn) pinBtn.classList.toggle("is-active", !!stream.pinned);
 
     const focusBtn = cardEl.querySelector('[data-action="focus"]');
-    if (focusBtn) {
-      focusBtn.classList.toggle("is-active", !!stream.focused);
-    }
+    if (focusBtn) focusBtn.classList.toggle("is-active", !!stream.focused);
   }
 
-  function refreshPlayerSrc(cardEl, stream) {
-    const iframe = cardEl.querySelector("iframe");
-    if (iframe) {
-      iframe.src = buildEmbedUrl(stream);
+  /**
+   * Atualiza apenas o texto do nome do canal e o badge de plataforma
+   * DESTE card (usado após edição) — nenhum outro card é tocado.
+   */
+  function updateCardHeader(cardEl, stream) {
+    const nameEl = cardEl.querySelector('[data-role="channel-name"]');
+    if (nameEl) {
+      nameEl.textContent = stream.channel;
+      nameEl.title = stream.channel;
+    }
+    const badgeEl = cardEl.querySelector('[data-role="badge"]');
+    if (badgeEl) badgeEl.className = platformBadgeClass(stream.platform);
+  }
+
+  /**
+   * Recria SOMENTE o conteúdo interno de `.stream-card__player` deste
+   * card (iframe ou mensagem de status) — usado ao editar a stream,
+   * alternar mute, ou pedir para verificar novamente. Nenhum outro
+   * card no DOM é tocado, então nenhum outro player recarrega.
+   */
+  function refreshPlayerBody(cardEl, stream) {
+    const playerWrapper = cardEl.querySelector('[data-role="player"]');
+    if (playerWrapper) {
+      playerWrapper.innerHTML = renderPlayerBodyHTML(stream);
     }
   }
 
   function toggleChatPanel(cardEl) {
     const panel = cardEl.querySelector(".stream-card__chat-panel");
-    if (panel) {
-      panel.classList.toggle("is-open");
-    }
+    if (panel) panel.classList.toggle("is-open");
   }
 
   function requestFullscreen(cardEl) {
@@ -132,7 +195,10 @@
   }
 
   /**
-   * Remove um card do DOM com animação de saída.
+   * Remove um card do DOM com animação de saída. Não afeta nenhum
+   * outro card — o restante do grid se reorganiza automaticamente via
+   * CSS Grid, sem precisar recriar nada.
+   *
    * @param {HTMLElement} cardEl
    * @param {Function} onDone - callback chamado após a animação
    */
@@ -153,9 +219,11 @@
     buildEmbedUrl,
     createCardElement,
     applyStateClasses,
-    refreshPlayerSrc,
+    updateCardHeader,
+    refreshPlayerBody,
     toggleChatPanel,
     requestFullscreen,
     removeCardElement,
+    getQualitySupport,
   };
 })();

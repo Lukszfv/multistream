@@ -113,6 +113,14 @@
   pointer-events: auto;
 }
 
+.modal-overlay:not(.is-hidden) {
+  animation: fade-in var(--transition-fast) ease forwards;
+}
+
+.modal-overlay:not(.is-hidden) .modal {
+  animation: fade-in-up var(--transition-base) ease forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

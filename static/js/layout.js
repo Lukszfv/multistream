@@ -25,13 +25,50 @@
   }
 
   /**
+   * Sincroniza a ordem dos elementos filhos de `containerEl` com a
+   * ordem de `orderedIds`, usando `cardElements` (Map id -> nó DOM)
+   * para localizar cada elemento.
+   *
+   * Só move um nó quando ele realmente não está na posição correta
+   * (compara com `containerEl.children[index]`). Isso é o que garante
+   * que adicionar, remover, mutar ou editar uma stream não force um
+   * "reflow" de todos os outros players — cada card só é tocado
+   * quando sua posição relativa de fato muda (ex.: ao fixar uma live,
+   * arrastar manualmente, ou entrar/sair do modo foco).
+   *
+   * @param {HTMLElement} containerEl
+   * @param {Array<string>} orderedIds
+   * @param {Map<string, HTMLElement>} cardElements
+   */
+  function syncContainerOrder(containerEl, orderedIds, cardElements) {
+    orderedIds.forEach((id, index) => {
+      const card = cardElements.get(id);
+      if (!card) return;
+
+      const nodeCurrentlyAtIndex = containerEl.children[index];
+      if (nodeCurrentlyAtIndex !== card) {
+        containerEl.insertBefore(card, nodeCurrentlyAtIndex || null);
+      }
+    });
+
+    // Remove do container qualquer card "sobrando" que não está mais
+    // na lista de IDs esperada (ex.: acabou de ser movido para outro
+    // container, como ao entrar/sair do modo foco).
+    Array.from(containerEl.children).forEach((child) => {
+      const id = child.dataset && child.dataset.id;
+      if (id && !orderedIds.includes(id)) {
+        child.remove();
+      }
+    });
+  }
+
+  /**
    * Habilita drag and drop dentro de um container de cards. Quando o
    * usuário solta um card sobre outro, `onReorder(draggedId, targetId)`
    * é chamado para que o app.js reordene o estado real.
    *
-   * A função é idempotente: pode ser chamada de novo após o grid ser
-   * re-renderizado sem duplicar listeners (usamos delegação de evento
-   * no container em vez de listeners por card).
+   * Idempotente: pode ser chamada de novo sem duplicar listeners
+   * (usamos delegação de evento no container).
    *
    * @param {HTMLElement} containerEl
    * @param {Function} onReorder
@@ -145,6 +182,7 @@
   window.MSH.layout = {
     updateGridCount,
     sortStreamsForDisplay,
+    syncContainerOrder,
     enableDragAndDrop,
     saveLayout,
     listLayouts,

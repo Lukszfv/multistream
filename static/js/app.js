@@ -3,6 +3,9 @@
 
   const { api, players, layout, focus } = window.MSH;
 
+  // -----------------------------------------------------------------
+  // ESTADO GLOBAL
+  // -----------------------------------------------------------------
   const state = {
     streams: [],
     settings: {
@@ -17,15 +20,33 @@
 
   const SETTINGS_KEY = "msh:settings";
   const AUTOSAVE_LAYOUT_NAME = "__autosave__";
-  let idCounter = 0;
 
+  // -----------------------------------------------------------------
+  // GERENCIADOR DE PLAYERS
+  // -----------------------------------------------------------------
+  // `cardElements` é o coração da correção de performance: mapeia o ID
+  // único e estável de cada stream (ex.: "player-1", "player-2") para
+  // o NÓ DOM real do seu card. Uma vez criado, um card só é destruído
+  // quando a própria stream é removida — nunca por causa de outra
+  // stream sendo adicionada/removida/editada/mutada.
+  const cardElements = new Map();
+
+  let idCounter = 0;
   function generateId() {
     idCounter += 1;
-    return `stream-${Date.now()}-${idCounter}`;
+    return `player-${idCounter}`; // IDs nunca são reaproveitados
   }
 
+  // -----------------------------------------------------------------
+  // REFERÊNCIAS DE ELEMENTOS DOM
+  // -----------------------------------------------------------------
   const el = {
     streamsArea: document.getElementById("streams-area"),
+    emptyState: document.getElementById("empty-state"),
+    streamsGrid: document.getElementById("streams-grid"),
+    focusRow: document.getElementById("focus-row"),
+    focusSecondaryRow: document.getElementById("focus-secondary-row"),
+
     addStreamPanel: document.getElementById("add-stream-panel"),
     addStreamForm: document.getElementById("add-stream-form"),
     platformSelect: document.getElementById("platform-select"),
@@ -33,6 +54,7 @@
 
     btnAddStream: document.getElementById("btn-add-stream"),
     btnLayout: document.getElementById("btn-layout"),
+    btnMuteAll: document.getElementById("btn-mute-all"),
     btnSettings: document.getElementById("btn-settings"),
     btnTheme: document.getElementById("btn-theme"),
     btnCloseSettings: document.getElementById("btn-close-settings"),
@@ -44,14 +66,25 @@
 
     settingTheme: document.getElementById("setting-theme"),
     settingQuality: document.getElementById("setting-quality"),
+    qualityNote: document.getElementById("quality-note"),
     settingAutoMute: document.getElementById("setting-auto-mute"),
     settingAutoFocus: document.getElementById("setting-auto-focus"),
     settingLanguage: document.getElementById("setting-language"),
     settingAutoSave: document.getElementById("setting-auto-save"),
 
+    editModalOverlay: document.getElementById("edit-modal-overlay"),
+    editStreamForm: document.getElementById("edit-stream-form"),
+    editPlatformSelect: document.getElementById("edit-platform-select"),
+    editChannelInput: document.getElementById("edit-channel-input"),
+    btnCloseEditModal: document.getElementById("btn-close-edit-modal"),
+    btnCancelEdit: document.getElementById("btn-cancel-edit"),
+
     toast: document.getElementById("toast"),
   };
 
+  // -----------------------------------------------------------------
+  // TOAST
+  // -----------------------------------------------------------------
   let toastTimeout = null;
   function showToast(message) {
     el.toast.textContent = message;
@@ -62,60 +95,99 @@
     }, 2600);
   }
 
+  // -----------------------------------------------------------------
+  // CRIAÇÃO DE CARDS (uma única vez por stream)
+  // -----------------------------------------------------------------
   function createCard(stream) {
     const card = players.createCardElement(stream);
-
     card.addEventListener("click", (event) => {
       const button = event.target.closest("[data-action]");
       if (!button) return;
       handleCardAction(button.dataset.action, stream.id, card);
     });
-
+    cardElements.set(stream.id, card);
     return card;
   }
 
-  function render() {
+  function getOrCreateCardElement(stream) {
+    return cardElements.get(stream.id) || createCard(stream);
+  }
+
+  // -----------------------------------------------------------------
+  // SINCRONIZAÇÃO DE TELA (substitui o antigo render() que recriava
+  // tudo). Em vez de reconstruir o DOM inteiro a cada mudança, esta
+  // função:
+  //   1. Garante que exista um card para cada stream (só cria os que
+  //      ainda não existem — os já existentes não são tocados aqui).
+  //   2. Alterna quais dos 4 containers persistentes ficam visíveis
+  //      (vazio / grid / foco), sem recriar nenhum deles.
+  //   3. Move os cards para o container/posição corretos usando
+  //      layout.syncContainerOrder, que só mexe em quem realmente
+  //      mudou de lugar.
+  // -----------------------------------------------------------------
+  function syncView() {
     const streams = state.streams;
 
     if (streams.length === 0) {
-      focus.exitFocusMode(el.streamsArea);
-      el.streamsArea.innerHTML = `
-        <div id="streams-grid" class="streams-grid" data-count="0">
-          <div class="empty-state" id="empty-state">
-            <div class="empty-state__icon">📺</div>
-            <div class="empty-state__title">Nenhuma live adicionada ainda</div>
-            <p class="text-secondary">
-              Clique em "Adicionar Stream" para começar a montar seu multistream.
-            </p>
-          </div>
-        </div>
-      `;
+      el.emptyState.classList.remove("is-hidden");
+      el.streamsGrid.classList.add("is-hidden");
+      el.focusRow.classList.add("is-hidden");
+      el.focusSecondaryRow.classList.add("is-hidden");
+      el.streamsArea.classList.remove("is-focus-mode");
       return;
     }
+
+    el.emptyState.classList.add("is-hidden");
+    streams.forEach((stream) => getOrCreateCardElement(stream));
 
     if (focus.isFocusModeActive(streams)) {
-      focus.renderFocusMode(el.streamsArea, streams, createCard);
-      return;
+      el.streamsGrid.classList.add("is-hidden");
+      el.focusRow.classList.remove("is-hidden");
+      el.focusSecondaryRow.classList.remove("is-hidden");
+      el.streamsArea.classList.add("is-focus-mode");
+
+      focus.syncFocusContainers(el.focusRow, el.focusSecondaryRow, streams, cardElements);
+    } else {
+      el.focusRow.classList.add("is-hidden");
+      el.focusSecondaryRow.classList.add("is-hidden");
+      el.streamsArea.classList.remove("is-focus-mode");
+      el.streamsGrid.classList.remove("is-hidden");
+
+      const ordered = layout.sortStreamsForDisplay(streams);
+      layout.updateGridCount(el.streamsGrid, ordered.length);
+      layout.syncContainerOrder(el.streamsGrid, ordered.map((s) => s.id), cardElements);
+      layout.enableDragAndDrop(el.streamsGrid, reorderStreams);
     }
 
-    focus.exitFocusMode(el.streamsArea);
-    const gridEl = document.createElement("div");
-    gridEl.id = "streams-grid";
-    gridEl.className = "streams-grid";
-
-    const ordered = layout.sortStreamsForDisplay(streams);
-    ordered.forEach((stream) => gridEl.appendChild(createCard(stream)));
-
-    layout.updateGridCount(gridEl, ordered.length);
-    el.streamsArea.appendChild(gridEl);
-
-    layout.enableDragAndDrop(gridEl, reorderStreams);
+    updateMuteAllButtonUI();
   }
 
   function persistIfAutoSave() {
     if (state.settings.autoSave) {
       layout.saveLayout(AUTOSAVE_LAYOUT_NAME, state.streams);
     }
+  }
+
+  // -----------------------------------------------------------------
+  // AÇÕES SOBRE STREAMS
+  // -----------------------------------------------------------------
+
+  /** Constrói o objeto de estado de uma stream a partir da resposta da API. */
+  function buildStreamFromApiResponse(data, extra) {
+    return {
+      id: generateId(),
+      platform: data.platform,
+      channel: data.channel,
+      embedUrl: data.embed_url,
+      isLive: !!data.is_live,
+      found: data.found !== false,
+      statusMessage: data.message || null,
+      muted: state.settings.autoMute,
+      pinned: false,
+      focused: false,
+      quality: state.settings.quality,
+      ...extra,
+    };
   }
 
   async function addStream(platform, channelRaw) {
@@ -132,35 +204,37 @@
 
     try {
       const data = await api.resolveChannel(platform, channel);
+      const stream = buildStreamFromApiResponse(data);
 
-      const stream = {
-        id: generateId(),
-        platform: data.platform,
-        channel: data.channel,
-        embedUrl: data.embed_url,
-        muted: state.settings.autoMute,
-        pinned: false,
-        focused: false,
-      };
-
+      // Só cria o player NOVO — nenhum outro card é tocado.
       state.streams.push(stream);
-      render();
+      syncView();
       persistIfAutoSave();
-      showToast(`${channel} adicionado.`);
+
+      if (stream.isLive) {
+        showToast(`${stream.channel} adicionado.`);
+      } else {
+        showToast(stream.statusMessage || "Canal adicionado, mas não está ao vivo no momento.");
+      }
     } catch (err) {
       showToast(err.message || "Erro ao adicionar a live.");
     }
   }
 
-  function removeStream(id, cardEl) {
+  function removeStream(id) {
+    const cardEl = cardElements.get(id);
+
     const finish = () => {
+      cardElements.delete(id);
       state.streams = state.streams.filter((s) => s.id !== id);
-      render();
+      // O grid se reorganiza sozinho via CSS Grid/Flex; os players
+      // restantes nunca são recriados.
+      syncView();
       persistIfAutoSave();
     };
 
     if (cardEl) {
-      players.removeCardElement(cardEl, finish);
+      players.removeCardElement(cardEl, finish); // remove só ESTE card
     } else {
       finish();
     }
@@ -170,15 +244,25 @@
     const stream = state.streams.find((s) => s.id === id);
     if (!stream) return;
     stream.muted = !stream.muted;
-    render();
+
+    const cardEl = cardElements.get(id);
+    if (cardEl) {
+      players.refreshPlayerBody(cardEl, stream); // recarrega só este iframe
+      players.applyStateClasses(cardEl, stream);
+    }
     persistIfAutoSave();
+    updateMuteAllButtonUI();
   }
 
   function togglePin(id) {
     const stream = state.streams.find((s) => s.id === id);
     if (!stream) return;
     stream.pinned = !stream.pinned;
-    render();
+
+    const cardEl = cardElements.get(id);
+    if (cardEl) players.applyStateClasses(cardEl, stream);
+
+    syncView(); // pode reposicionar o card, mas não recria nenhum iframe
     persistIfAutoSave();
   }
 
@@ -189,7 +273,12 @@
       return;
     }
     state.streams = result.streams;
-    render();
+
+    const updatedStream = state.streams.find((s) => s.id === id);
+    const cardEl = cardElements.get(id);
+    if (cardEl && updatedStream) players.applyStateClasses(cardEl, updatedStream);
+
+    syncView();
     persistIfAutoSave();
   }
 
@@ -202,14 +291,34 @@
     const [moved] = streams.splice(fromIndex, 1);
     streams.splice(toIndex, 0, moved);
 
-    render();
+    syncView(); // só move quem de fato trocou de posição
     persistIfAutoSave();
+  }
+
+  /** Verifica novamente uma stream específica (ex.: canal estava offline). */
+  async function retryStream(id) {
+    const stream = state.streams.find((s) => s.id === id);
+    if (!stream) return;
+
+    try {
+      const data = await api.resolveChannel(stream.platform, stream.channel);
+      stream.embedUrl = data.embed_url;
+      stream.isLive = !!data.is_live;
+      stream.found = data.found !== false;
+      stream.statusMessage = data.message || null;
+
+      const cardEl = cardElements.get(id);
+      if (cardEl) players.refreshPlayerBody(cardEl, stream);
+      persistIfAutoSave();
+    } catch (err) {
+      showToast(err.message || "Erro ao verificar a stream.");
+    }
   }
 
   function handleCardAction(action, id, cardEl) {
     switch (action) {
       case "remove":
-        removeStream(id, cardEl);
+        removeStream(id);
         break;
       case "mute":
         toggleMute(id);
@@ -223,14 +332,87 @@
       case "chat":
         players.toggleChatPanel(cardEl);
         break;
+      case "edit":
+        openEditModal(id);
+        break;
       case "fullscreen":
         players.requestFullscreen(cardEl);
+        break;
+      case "retry":
+        retryStream(id);
         break;
       default:
         break;
     }
   }
 
+  // -----------------------------------------------------------------
+  // EDITAR STREAM (modal)
+  // -----------------------------------------------------------------
+  let editingStreamId = null;
+
+  function openEditModal(id) {
+    const stream = state.streams.find((s) => s.id === id);
+    if (!stream) return;
+
+    editingStreamId = id;
+    el.editPlatformSelect.value = stream.platform;
+    el.editChannelInput.value = stream.channel;
+    el.editModalOverlay.classList.remove("is-hidden");
+    el.editChannelInput.focus();
+  }
+
+  function closeEditModal() {
+    el.editModalOverlay.classList.add("is-hidden");
+    editingStreamId = null;
+  }
+
+  el.btnCloseEditModal.addEventListener("click", closeEditModal);
+  el.btnCancelEdit.addEventListener("click", closeEditModal);
+  el.editModalOverlay.addEventListener("click", (event) => {
+    if (event.target === el.editModalOverlay) closeEditModal();
+  });
+
+  el.editStreamForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!editingStreamId) return;
+
+    const stream = state.streams.find((s) => s.id === editingStreamId);
+    if (!stream) return;
+
+    const newPlatform = el.editPlatformSelect.value;
+    const newChannel = el.editChannelInput.value.trim();
+    if (!newChannel) return;
+
+    try {
+      const data = await api.resolveChannel(newPlatform, newChannel);
+
+      // Atualiza SOMENTE esta stream — id, posição, pin, foco e mute
+      // permanecem exatamente como estavam.
+      stream.platform = data.platform;
+      stream.channel = data.channel;
+      stream.embedUrl = data.embed_url;
+      stream.isLive = !!data.is_live;
+      stream.found = data.found !== false;
+      stream.statusMessage = data.message || null;
+
+      const cardEl = cardElements.get(stream.id);
+      if (cardEl) {
+        players.updateCardHeader(cardEl, stream); // nome/badge deste card
+        players.refreshPlayerBody(cardEl, stream); // player deste card
+      }
+
+      persistIfAutoSave();
+      closeEditModal();
+      showToast("Stream atualizada.");
+    } catch (err) {
+      showToast(err.message || "Erro ao atualizar a stream.");
+    }
+  });
+
+  // -----------------------------------------------------------------
+  // FORMULÁRIO "ADICIONAR STREAM"
+  // -----------------------------------------------------------------
   el.btnAddStream.addEventListener("click", () => {
     el.addStreamPanel.classList.toggle("is-hidden");
     if (!el.addStreamPanel.classList.contains("is-hidden")) {
@@ -246,6 +428,52 @@
     el.channelInput.value = "";
   });
 
+  // -----------------------------------------------------------------
+  // MUTE GLOBAL ("acima das streams")
+  // -----------------------------------------------------------------
+  // Um único botão que funciona como um alternador inteligente:
+  //   - se existe pelo menos uma stream desmutada -> muta todas
+  //     (equivalente ao "Modo 1: mutar todas")
+  //   - se todas já estão mutadas -> desmuta todas
+  //     (equivalente ao "Modo 2: desmutar todas")
+  // O clique sempre alterna entre esses dois estados de conjunto
+  // ("Modo 3: alternar"), e o ícone reflete o estado atual.
+  function updateMuteAllButtonUI() {
+    if (state.streams.length === 0) {
+      el.btnMuteAll.textContent = "🔊";
+      el.btnMuteAll.setAttribute("aria-pressed", "false");
+      el.btnMuteAll.classList.remove("is-active");
+      return;
+    }
+    const allMuted = state.streams.every((s) => s.muted);
+    el.btnMuteAll.textContent = allMuted ? "🔇" : "🔊";
+    el.btnMuteAll.setAttribute("aria-pressed", String(allMuted));
+    el.btnMuteAll.classList.toggle("is-active", allMuted);
+  }
+
+  el.btnMuteAll.addEventListener("click", () => {
+    if (state.streams.length === 0) return;
+
+    const allMuted = state.streams.every((s) => s.muted);
+    const nextMuted = !allMuted;
+
+    state.streams.forEach((stream) => {
+      stream.muted = nextMuted;
+      const cardEl = cardElements.get(stream.id);
+      if (cardEl) {
+        players.refreshPlayerBody(cardEl, stream);
+        players.applyStateClasses(cardEl, stream);
+      }
+    });
+
+    updateMuteAllButtonUI();
+    persistIfAutoSave();
+    showToast(nextMuted ? "Todas as streams foram mutadas." : "Todas as streams foram desmutadas.");
+  });
+
+  // -----------------------------------------------------------------
+  // TEMA
+  // -----------------------------------------------------------------
   function applyTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
     state.settings.theme = theme;
@@ -261,6 +489,9 @@
 
   el.settingTheme.addEventListener("change", (e) => applyTheme(e.target.value));
 
+  // -----------------------------------------------------------------
+  // SIDEBAR DE CONFIGURAÇÕES
+  // -----------------------------------------------------------------
   function openSettings() {
     el.sidebar.classList.add("is-open");
     el.sidebarOverlay.classList.add("is-open");
@@ -304,12 +535,28 @@
     el.settingAutoSave.checked = state.settings.autoSave;
     document.documentElement.setAttribute("data-theme", state.settings.theme);
     el.btnTheme.textContent = state.settings.theme === "blue" ? "🔵" : "🌙";
+    updateQualityNote();
+  }
+
+  // -----------------------------------------------------------------
+  // QUALIDADE PADRÃO
+  // -----------------------------------------------------------------
+  // A qualidade escolhida é salva no LocalStorage (via saveSettings)
+  // e aplicada a toda NOVA stream adicionada depois da escolha (não é
+  // possível "empurrar" qualidade retroativamente para um iframe já
+  // carregado sem recarregá-lo, então streams existentes não mudam).
+  function updateQualityNote() {
+    if (!el.qualityNote) return;
+    el.qualityNote.textContent =
+      "Aplicada apenas a novas streams. A Twitch e o Kick não expõem controle de " +
+      "qualidade via <iframe> simples (exigiria o SDK oficial de cada plataforma). " +
+      "No YouTube o parâmetro é legado e pode ser ignorado pelo player.";
   }
 
   el.settingQuality.addEventListener("change", (e) => {
     state.settings.quality = e.target.value;
     saveSettings();
-    showToast("Qualidade padrão atualizada.");
+    showToast("Qualidade padrão atualizada para novas streams.");
   });
 
   el.settingAutoMute.addEventListener("change", (e) => {
@@ -333,6 +580,9 @@
     if (state.settings.autoSave) persistIfAutoSave();
   });
 
+  // -----------------------------------------------------------------
+  // LAYOUTS SALVOS
+  // -----------------------------------------------------------------
   function renderSavedLayoutsList() {
     const layouts = layout.listLayouts().filter((l) => l.name !== AUTOSAVE_LAYOUT_NAME);
 
@@ -385,37 +635,44 @@
     showToast(`Layout "${name.trim()}" salvo.`);
   });
 
+  /** Remove todos os cards atuais do DOM e zera o estado de streams. */
+  function clearAllStreams() {
+    cardElements.forEach((cardEl) => cardEl.remove());
+    cardElements.clear();
+    state.streams = [];
+  }
+
+  /** Carrega um layout salvo, refazendo a resolução de cada canal via API. */
   async function loadNamedLayout(name) {
     const data = layout.getLayout(name);
     if (!data) return;
 
-    state.streams = [];
-    render();
+    clearAllStreams();
+    syncView();
 
     showToast(`Carregando layout "${name}"...`);
 
     for (const saved of data.streams) {
       try {
         const resolved = await api.resolveChannel(saved.platform, saved.channel);
-        state.streams.push({
-          id: generateId(),
-          platform: resolved.platform,
-          channel: resolved.channel,
-          embedUrl: resolved.embed_url,
+        const stream = buildStreamFromApiResponse(resolved, {
           muted: saved.muted ?? state.settings.autoMute,
           pinned: saved.pinned ?? false,
-          focused: false,
         });
+        state.streams.push(stream);
       } catch (err) {
         console.warn(`Falha ao carregar ${saved.channel}:`, err);
       }
     }
 
-    render();
+    syncView();
     closeSettings();
     showToast(`Layout "${name}" carregado.`);
   }
 
+  // -----------------------------------------------------------------
+  // INICIALIZAÇÃO
+  // -----------------------------------------------------------------
   async function init() {
     loadSettings();
     applySettingsToUI();
@@ -427,22 +684,18 @@
       }
     }
 
-    render();
+    syncView();
   }
 
   async function loadAutosave(autosave) {
     for (const saved of autosave.streams) {
       try {
         const resolved = await api.resolveChannel(saved.platform, saved.channel);
-        state.streams.push({
-          id: generateId(),
-          platform: resolved.platform,
-          channel: resolved.channel,
-          embedUrl: resolved.embed_url,
+        const stream = buildStreamFromApiResponse(resolved, {
           muted: saved.muted ?? state.settings.autoMute,
           pinned: saved.pinned ?? false,
-          focused: false,
         });
+        state.streams.push(stream);
       } catch (err) {
         console.warn(`Falha ao restaurar ${saved.channel}:`, err);
       }

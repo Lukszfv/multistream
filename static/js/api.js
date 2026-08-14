@@ -27,11 +27,7 @@
   }
 
   /**
-   * Consulta a lista de plataformas suportadas pelo backend.
-   * Usado para, futuramente, popular o <select> dinamicamente sem
-   * precisar hardcodar as opções no HTML.
-   *
-   * @returns {Promise<string[]>}
+   *  @returns {Promise<string[]>}
    */
   async function getSupportedPlatforms() {
     const response = await fetch("/api/platforms");
