@@ -266,10 +266,35 @@ a {
 }
 
 .add-stream-form {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--gap-sm);
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 2.2fr) auto;
+  grid-template-areas:
+    "platform-label channel-label ."
+    "platform-field channel-field submit"
+    ".              channel-hint  .";
+  column-gap: var(--gap-sm);
+  row-gap: 6px;
+  align-items: center;
+}
+
+/* Só dentro do formulário de adicionar: o wrapper .form-field vira
+   "invisível" para o layout, deixando label/campo/hint participarem
+   diretamente do grid acima (alinhados por área). O modal de edição
+   continua usando .form-field como flex-column normal. */
+.add-stream-form .form-field {
+  display: contents;
+}
+
+.form-field--platform label { grid-area: platform-label; }
+.form-field--platform select { grid-area: platform-field; }
+
+.form-field--channel label { grid-area: channel-label; }
+.form-field--channel input { grid-area: channel-field; }
+.form-field--channel .form-field__hint { grid-area: channel-hint; }
+
+.add-stream-form__submit {
+  grid-area: submit;
+  align-self: stretch;
 }
 
 .form-field {

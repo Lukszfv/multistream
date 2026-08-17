@@ -22,9 +22,20 @@
         <button id="btn-add-stream" class="btn btn--primary" type="button">
           <span>＋</span> Adicionar Stream
         </button>
+        
+        <div class="layout-menu">
+          <button id="btn-layout-menu" class="btn btn--icon" type="button" title="Selecionar layout salvo" aria-haspopup="true" aria-expanded="false">
+            ▦
+          </button>
+          <div id="layout-menu-dropdown" class="layout-menu__dropdown is-hidden">
+            <div class="layout-menu__title">Layouts salvos</div>
+            <div id="layout-menu-list" class="layout-menu__list"></div>
+            <button id="btn-manage-layouts" class="layout-menu__manage" type="button">⚙ Gerenciar layouts</button>
+          </div>
+        </div>
 
-        <button id="btn-layout" class="btn btn--icon" type="button" title="Salvar / Carregar Layout">
-          ▦
+        <button id="btn-stream-list" class="btn btn--icon" type="button" title="Gerenciar Streams">
+          📋
         </button>
 
         <button id="btn-mute-all" class="btn btn--icon" type="button" title="Mutar / desmutar todas as streams" aria-pressed="false">
@@ -44,7 +55,7 @@
     <main class="app__main">
       <section id="add-stream-panel" class="add-stream-panel is-hidden">
         <form id="add-stream-form" class="add-stream-form">
-          <div class="form-field">
+          <div class="form-field form-field--platform">
             <label for="platform-select">Plataforma</label>
             <select id="platform-select" name="platform">
               <option value="twitch">Twitch</option>
@@ -53,7 +64,7 @@
             </select>
           </div>
 
-          <div class="form-field">
+          <div class="form-field form-field--channel">
             <label for="channel-input">Canal</label>
             <input
               id="channel-input"
@@ -68,7 +79,7 @@
             </span>
           </div>
 
-          <button type="submit" class="btn btn--primary">Adicionar</button>
+          <button type="submit" class="btn btn--primary add-stream-form__submit">Adicionar</button>
         </form>
       </section>
 
@@ -85,6 +96,8 @@
 
         <div id="focus-row" class="focus-row is-hidden" data-count="0"></div>
         <div id="focus-secondary-row" class="focus-secondary-row is-hidden"></div>
+
+        <div id="hidden-stash" class="hidden-stash is-hidden"></div>
       </section>
 
     </main>
@@ -174,6 +187,26 @@
         </button>
       </div>
 
+    </div>
+  </aside>
+
+  <div id="stream-list-overlay" class="sidebar-overlay"></div>
+
+  <aside id="stream-list-sidebar" class="sidebar" aria-label="Gerenciar Streams">
+    <div class="sidebar__header">
+      <span class="sidebar__title">Gerenciar Streams</span>
+      <button id="btn-close-stream-list" class="btn btn--icon btn--ghost" type="button">✕</button>
+    </div>
+
+    <div class="sidebar__body">
+      <div id="stream-list-items" class="stream-list"></div>
+
+      <div class="stream-list-controls">
+        <button id="btn-play-all-paused" class="btn btn--sm" type="button">▶ Play all paused streams</button>
+        <button id="btn-pause-all" class="btn btn--sm" type="button">⏸ Pause all streams</button>
+        <button id="btn-mute-all-panel" class="btn btn--sm" type="button">🔇 Mute all streams</button>
+        <button id="btn-reload-all" class="btn btn--sm btn--danger" type="button">↻ Reload all streams</button>
+      </div>
     </div>
   </aside>
 
