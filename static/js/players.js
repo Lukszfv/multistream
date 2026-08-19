@@ -3,96 +3,317 @@
 
   window.MSH = window.MSH || {};
 
-  const QUALITY_SUPPORT = {
-    twitch: { supported: false },
-    kick: { supported: false },
-    youtube: { supported: "best-effort" },
-  };
-
-  const YOUTUBE_VQ_MAP = {
+  // -----------------------------------------------------------------
+  // QUALIDADE — aplicada via API oficial de cada player
+  // -----------------------------------------------------------------
+  // Twitch: Twitch.Player (SDK oficial) -> player.setQuality()
+  // YouTube: postMessage (API oficial do iframe) -> setPlaybackQuality
+  // Kick: não há API pública documentada para isso no player embutido.
+  const YOUTUBE_QUALITY_LEVELS = {
     "1080p": "hd1080",
     "720p": "hd720",
     "480p": "large",
     "360p": "medium",
-    "160p": "tiny",
+    "160p": "small",
   };
 
+  const QUALITY_SUPPORT = { twitch: true, youtube: true, kick: false };
+
   function getQualitySupport(platform) {
-    return QUALITY_SUPPORT[platform] || { supported: false };
+    return !!QUALITY_SUPPORT[platform];
   }
 
-  /**
-   * Monta a URL de embed definitiva de um player, incluindo os
-   * parâmetros específicos de cada plataforma (mute, parent, autoplay,
-   * qualidade quando aplicável).
-   *
-   * @param {Object} stream - { platform, channel, embedUrl, muted, quality }
-   * @returns {string}
-   */
-  function buildEmbedUrl(stream) {
-    const params = new URLSearchParams();
+  function warnUnsupportedQuality(stream) {
+    console.warn(
+      `[MultiStream] A plataforma "${stream.platform}" não expõe API oficial de qualidade ` +
+      `para o player embutido. Ignorando qualidade padrão para "${stream.channel}".`
+    );
+  }
 
-    switch (stream.platform) {
-      case "twitch":
-        params.set("parent", window.location.hostname || "localhost");
-        params.set("muted", stream.muted ? "true" : "false");
-        params.set("autoplay", "true");
-        return `${stream.embedUrl}&${params.toString()}`;
+  // -----------------------------------------------------------------
+  // TWITCH — SDK oficial (player.twitch.tv/js/embed/v1.js)
+  // -----------------------------------------------------------------
+  let twitchScriptPromise = null;
+  function ensureTwitchScript() {
+    if (window.Twitch && window.Twitch.Player) return Promise.resolve();
+    if (twitchScriptPromise) return twitchScriptPromise;
 
-      case "youtube":
-        params.set("autoplay", "1");
-        params.set("mute", stream.muted ? "1" : "0");
-        if (stream.quality && stream.quality !== "auto" && YOUTUBE_VQ_MAP[stream.quality]) {
-          params.set("vq", YOUTUBE_VQ_MAP[stream.quality]);
-        }
-        return `${stream.embedUrl}?${params.toString()}`;
+    twitchScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://player.twitch.tv/js/embed/v1.js";
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Falha ao carregar o SDK da Twitch."));
+      document.head.appendChild(script);
+    });
+    return twitchScriptPromise;
+  }
 
-      case "kick":
-        params.set("muted", stream.muted ? "true" : "false");
-        params.set("autoplay", "true");
-        return `${stream.embedUrl}?${params.toString()}`;
+  // Instâncias vivas dos players — NÃO faz parte do estado sério da
+  // aplicação (é só a "ponte" para chamar métodos oficiais do player).
+  const twitchPlayers = new Map(); // streamId -> Twitch.Player
 
-      default:
-        return stream.embedUrl;
+  async function mountTwitchPlayer(cardEl, stream) {
+    const mountEl = cardEl.querySelector(`#twitch-mount-${stream.id}`);
+    if (!mountEl) return;
+
+    try {
+      await ensureTwitchScript();
+    } catch (err) {
+      console.warn("[MultiStream]", err.message);
+      return;
     }
+
+    // O card pode ter sido removido enquanto o script carregava.
+    if (!document.body.contains(mountEl)) return;
+    // Evita criar duas instâncias para o mesmo card (ex.: chamadas concorrentes).
+    if (twitchPlayers.has(stream.id)) return;
+
+    const player = new window.Twitch.Player(mountEl.id, {
+      channel: stream.channel,
+      parent: [window.location.hostname],
+      muted: stream.muted,
+      autoplay: true,
+      width: "100%",
+      height: "100%",
+    });
+
+    twitchPlayers.set(stream.id, player);
+
+    player.addEventListener(window.Twitch.Player.READY, () => {
+      applyTwitchQuality(player, stream);
+    });
+  }
+
+  function applyTwitchQuality(player, stream) {
+    if (!stream.quality || stream.quality === "auto") return;
+    try {
+      const qualities = typeof player.getQualities === "function" ? player.getQualities() : [];
+      const match = qualities.find((q) => q.group && q.group.startsWith(stream.quality));
+      if (match) {
+        player.setQuality(match.group);
+      } else {
+        console.warn(
+          `[MultiStream] Qualidade "${stream.quality}" indisponível para "${stream.channel}" ` +
+          `(Twitch); mantendo a automática.`
+        );
+      }
+    } catch (err) {
+      console.warn("[MultiStream] Não foi possível aplicar qualidade na Twitch:", err);
+    }
+  }
+
+  // -----------------------------------------------------------------
+  // YOUTUBE — API oficial via postMessage no próprio <iframe>
+  // -----------------------------------------------------------------
+  function postYouTubeCommand(iframe, func, args) {
+    if (!iframe || !iframe.contentWindow) return;
+    try {
+      iframe.contentWindow.postMessage(
+        JSON.stringify({ event: "command", func, args: args || [] }),
+        "*"
+      );
+    } catch (err) {
+      console.warn("[MultiStream] Falha ao enviar comando ao player do YouTube:", err);
+    }
+  }
+
+  function buildYouTubeSrc(stream) {
+    const params = new URLSearchParams();
+    params.set("autoplay", "1");
+    params.set("mute", stream.muted ? "1" : "0");
+    params.set("enablejsapi", "1");
+    params.set("origin", window.location.origin);
+    return `${stream.embedUrl}?${params.toString()}`;
+  }
+
+  function mountYouTubePlayer(cardEl, stream) {
+    const iframe = cardEl.querySelector(`#youtube-iframe-${stream.id}`);
+    if (!iframe) return;
+
+    const applyQuality = () => {
+      if (!stream.quality || stream.quality === "auto") return;
+      const level = YOUTUBE_QUALITY_LEVELS[stream.quality];
+      if (!level) return;
+      postYouTubeCommand(iframe, "setPlaybackQuality", [level]);
+    };
+
+    // O player interno do YouTube demora um instante para inicializar a
+    // API mesmo depois do "load" do iframe — reforçamos o comando sem
+    // nunca trocar o "src" (ou seja, sem recarregar o player).
+    iframe.addEventListener("load", () => {
+      applyQuality();
+      setTimeout(applyQuality, 800);
+      setTimeout(applyQuality, 2000);
+    });
+  }
+
+  // -----------------------------------------------------------------
+  // KICK — sem SDK oficial de qualidade; mantém <iframe> simples
+  // -----------------------------------------------------------------
+  function buildKickSrc(stream) {
+    const params = new URLSearchParams();
+    params.set("muted", stream.muted ? "true" : "false");
+    params.set("autoplay", "true");
+    return `${stream.embedUrl}?${params.toString()}`;
+  }
+
+  /** Mantido por compatibilidade com quem só precisa da URL (Kick/YouTube). */
+  function buildEmbedUrl(stream) {
+    if (stream.platform === "youtube") return buildYouTubeSrc(stream);
+    if (stream.platform === "kick") return buildKickSrc(stream);
+    return stream.embedUrl;
   }
 
   function platformBadgeClass(platform) {
     return `stream-card__platform-badge stream-card__platform-badge--${platform}`;
   }
 
+  // -----------------------------------------------------------------
+  // SHELL HTML (não instancia nenhum player ainda — isso é feito por
+  // mountPlayer, chamado depois que o card já está no DOM real)
+  // -----------------------------------------------------------------
   function renderPlayerBodyHTML(stream) {
-    if (stream.isLive) {
+    if (!stream.isLive) {
+      const icon = stream.found === false ? "❓" : "💤";
+      const message = stream.statusMessage || "Este canal não está ao vivo.";
+      return `
+        <div class="stream-card__status">
+          <span class="stream-card__status-icon">${icon}</span>
+          <span class="stream-card__status-message">${message}</span>
+          <button class="btn btn--sm" data-action="retry">Verificar novamente</button>
+        </div>
+      `;
+    }
+
+    if (stream.platform === "twitch") {
+      return `<div class="stream-card__twitch-mount" data-role="twitch-mount" id="twitch-mount-${stream.id}"></div>`;
+    }
+
+    if (stream.platform === "youtube") {
       return `
         <iframe
-          src="${buildEmbedUrl(stream)}"
-          allowfullscreen
+          id="youtube-iframe-${stream.id}"
+          data-role="youtube-iframe"
+          src="${buildYouTubeSrc(stream)}"
           allow="autoplay; fullscreen"
           loading="lazy"
         ></iframe>
       `;
     }
 
-    const icon = stream.found === false ? "❓" : "💤";
-    const message = stream.statusMessage || "Este canal não está ao vivo.";
-
     return `
-      <div class="stream-card__status">
-        <span class="stream-card__status-icon">${icon}</span>
-        <span class="stream-card__status-message">${message}</span>
-        <button class="btn btn--sm" data-action="retry">Verificar novamente</button>
-      </div>
+      <iframe
+        data-role="kick-iframe"
+        src="${buildKickSrc(stream)}"
+        allow="autoplay; fullscreen"
+        loading="lazy"
+      ></iframe>
     `;
   }
 
   /**
-   * Cria o elemento DOM completo de um card de live.
-   * O ID único da stream (ex.: "player-1") fica em `card.dataset.id`
-   * e nunca muda durante o ciclo de vida do card.
-   *
-   * @param {Object} stream - objeto de estado da live (ver app.js)
-   * @returns {HTMLElement}
+   * Instancia de fato o player (Twitch SDK / YouTube API / nada extra
+   * para Kick) DEPOIS que o card já está anexado ao documento. Só deve
+   * ser chamada para streams ao vivo recém-criadas ou recém-recarregadas
+   * — nunca em reorganizações puramente visuais (foco, layout, ocultar).
    */
+  async function mountPlayer(cardEl, stream) {
+    if (!stream.isLive) return;
+
+    if (stream.platform === "twitch") {
+      await mountTwitchPlayer(cardEl, stream);
+      return;
+    }
+    if (stream.platform === "youtube") {
+      mountYouTubePlayer(cardEl, stream);
+      return;
+    }
+    if (stream.quality && stream.quality !== "auto") {
+      warnUnsupportedQuality(stream); // Kick
+    }
+  }
+
+  /** Libera a instância viva de player associada a uma stream (Twitch). */
+  function disposePlayer(streamId) {
+    const player = twitchPlayers.get(streamId);
+    if (player) {
+      try {
+        if (typeof player.pause === "function") player.pause();
+      } catch (err) {
+        // sem problema, o elemento já está sendo descartado
+      }
+      twitchPlayers.delete(streamId);
+    }
+  }
+
+  // -----------------------------------------------------------------
+  // MUTE / PAUSE / PLAY — sempre via API oficial quando existir, para
+  // não precisar recarregar o player. Kick cai no fallback de iframe.
+  // -----------------------------------------------------------------
+  function applyMute(cardEl, stream) {
+    if (!stream.isLive) return;
+
+    if (stream.platform === "twitch") {
+      const player = twitchPlayers.get(stream.id);
+      if (player && typeof player.setMuted === "function") {
+        try {
+          player.setMuted(stream.muted);
+          return;
+        } catch (err) {
+          console.warn("[MultiStream] Falha ao mutar via Twitch Player API:", err);
+        }
+      }
+      return; // player ainda não montou; nasce com o mute correto ao montar
+    }
+
+    if (stream.platform === "youtube") {
+      const iframe = cardEl.querySelector('[data-role="youtube-iframe"]');
+      if (iframe) {
+        postYouTubeCommand(iframe, stream.muted ? "mute" : "unMute");
+        return;
+      }
+    }
+
+    // Kick: não há comando de mute via postMessage documentado — o único
+    // jeito é recarregar o iframe com o parâmetro atualizado.
+    refreshPlayerBody(cardEl, stream);
+    mountPlayer(cardEl, stream);
+  }
+
+  function applyPause(cardEl, stream) {
+    if (!stream.isLive) return;
+    if (stream.platform === "twitch") {
+      const player = twitchPlayers.get(stream.id);
+      if (player && typeof player.pause === "function") player.pause();
+      return;
+    }
+    if (stream.platform === "youtube") {
+      const iframe = cardEl.querySelector('[data-role="youtube-iframe"]');
+      if (iframe) postYouTubeCommand(iframe, "pauseVideo");
+      return;
+    }
+    console.warn(`[MultiStream] Pausar não é suportado pelo player do Kick ("${stream.channel}").`);
+  }
+
+  function applyPlay(cardEl, stream) {
+    if (!stream.isLive) return;
+    if (stream.platform === "twitch") {
+      const player = twitchPlayers.get(stream.id);
+      if (player && typeof player.play === "function") player.play();
+      return;
+    }
+    if (stream.platform === "youtube") {
+      const iframe = cardEl.querySelector('[data-role="youtube-iframe"]');
+      if (iframe) postYouTubeCommand(iframe, "playVideo");
+      return;
+    }
+    console.warn(`[MultiStream] Retomar não é suportado pelo player do Kick ("${stream.channel}").`);
+  }
+
+  // -----------------------------------------------------------------
+  // CRIAÇÃO / ATUALIZAÇÃO DE CARDS
+  // -----------------------------------------------------------------
   function createCardElement(stream) {
     const card = document.createElement("article");
     card.className = "stream-card is-entering";
@@ -104,6 +325,7 @@
         <div class="stream-card__info">
           <span class="${platformBadgeClass(stream.platform)}" data-role="badge"></span>
           <span class="stream-card__channel" data-role="channel-name" title="${stream.channel}">${stream.channel}</span>
+          <span class="stream-card__quality-badge is-hidden" data-role="quality-badge" title="Qualidade não suportada pelo player desta plataforma">⚠</span>
         </div>
         <div class="stream-card__controls">
           <button class="btn btn--icon" data-action="focus" title="Foco">⭐</button>
@@ -132,11 +354,6 @@
     return card;
   }
 
-  /**
-   * Sincroniza classes/ícones visuais do card (pinado, focado, mutado)
-   * com o estado atual do objeto stream. Não toca no <iframe> — pode
-   * ser chamado livremente sem causar reload de player.
-   */
   function applyStateClasses(cardEl, stream) {
     cardEl.classList.toggle("is-pinned", !!stream.pinned);
     cardEl.classList.toggle("is-focused-active", !!stream.focused);
@@ -152,12 +369,14 @@
 
     const focusBtn = cardEl.querySelector('[data-action="focus"]');
     if (focusBtn) focusBtn.classList.toggle("is-active", !!stream.focused);
+
+    const qualityBadge = cardEl.querySelector('[data-role="quality-badge"]');
+    if (qualityBadge) {
+      const unsupported = !!stream.quality && stream.quality !== "auto" && !getQualitySupport(stream.platform);
+      qualityBadge.classList.toggle("is-hidden", !unsupported);
+    }
   }
 
-  /**
-   * Atualiza apenas o texto do nome do canal e o badge de plataforma
-   * DESTE card (usado após edição) — nenhum outro card é tocado.
-   */
   function updateCardHeader(cardEl, stream) {
     const nameEl = cardEl.querySelector('[data-role="channel-name"]');
     if (nameEl) {
@@ -169,12 +388,13 @@
   }
 
   /**
-   * Recria SOMENTE o conteúdo interno de `.stream-card__player` deste
-   * card (iframe ou mensagem de status) — usado ao editar a stream,
-   * alternar mute, ou pedir para verificar novamente. Nenhum outro
-   * card no DOM é tocado, então nenhum outro player recarrega.
+   * Recria o conteúdo interno de `.stream-card__player` (usado só
+   * quando é realmente necessário trocar de player: editar
+   * plataforma/canal, refresh individual/geral, ou fallback de mute no
+   * Kick). Descarta qualquer instância de player anterior deste card.
    */
   function refreshPlayerBody(cardEl, stream) {
+    disposePlayer(stream.id);
     const playerWrapper = cardEl.querySelector('[data-role="player"]');
     if (playerWrapper) {
       playerWrapper.innerHTML = renderPlayerBodyHTML(stream);
@@ -189,20 +409,25 @@
   function requestFullscreen(cardEl) {
     const playerWrapper = cardEl.querySelector(".stream-card__player");
     if (playerWrapper && playerWrapper.requestFullscreen) {
-      playerWrapper.requestFullscreen().catch(() => {
-      });
+      playerWrapper.requestFullscreen().catch(() => {});
     }
   }
 
   /**
-   * Remove um card do DOM com animação de saída. Não afeta nenhum
-   * outro card — o restante do grid se reorganiza automaticamente via
-   * CSS Grid, sem precisar recriar nada.
-   *
-   * @param {HTMLElement} cardEl
-   * @param {Function} onDone - callback chamado após a animação
+   * Remove um card do DOM. Se o card não estiver visualmente renderizado
+   * (ex.: está na gaveta de ocultos, com display:none), a animação de
+   * saída não tocaria — nesse caso remove direto, sem esperar
+   * "animationend" (que nunca dispararia).
    */
   function removeCardElement(cardEl, onDone) {
+    const isRendered = cardEl.offsetParent !== null || getComputedStyle(cardEl).display !== "none";
+
+    if (!isRendered) {
+      cardEl.remove();
+      if (typeof onDone === "function") onDone();
+      return;
+    }
+
     cardEl.classList.remove("is-entering");
     cardEl.classList.add("is-exiting");
     cardEl.addEventListener(
@@ -225,5 +450,10 @@
     requestFullscreen,
     removeCardElement,
     getQualitySupport,
+    mountPlayer,
+    disposePlayer,
+    applyMute,
+    applyPause,
+    applyPlay,
   };
 })();

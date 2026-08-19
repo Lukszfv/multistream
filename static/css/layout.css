@@ -152,8 +152,19 @@
   }
 
   .add-stream-form {
-    flex-direction: column;
-    align-items: stretch;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "platform-label"
+      "platform-field"
+      "channel-label"
+      "channel-field"
+      "channel-hint"
+      "submit";
+  }
+
+  .add-stream-form__submit {
+    justify-self: stretch;
+    align-self: auto;
   }
 
   .navbar {

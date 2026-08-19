@@ -97,6 +97,7 @@
     streamListOverlay: document.getElementById("stream-list-overlay"),
     btnCloseStreamList: document.getElementById("btn-close-stream-list"),
     streamListItems: document.getElementById("stream-list-items"),
+    btnCopyList: document.getElementById("btn-copy-list"),
     btnPlayAllPaused: document.getElementById("btn-play-all-paused"),
     btnPauseAll: document.getElementById("btn-pause-all"),
     btnMuteAllPanel: document.getElementById("btn-mute-all-panel"),
@@ -879,6 +880,8 @@
   el.btnCloseStreamList.addEventListener("click", closeStreamList);
   el.streamListOverlay.addEventListener("click", closeStreamList);
 
+  const PLATFORM_LABELS = { twitch: "Twitch", youtube: "YouTube", kick: "Kick" };
+
   function renderStreamList() {
     if (!el.streamListItems) return;
 
@@ -894,16 +897,20 @@
       const item = document.createElement("div");
       item.className = "stream-list-item";
       item.dataset.id = stream.id;
+      item.draggable = true;
 
       const statusClass = stream.isLive ? "is-online" : "is-offline";
       const statusLabel = stream.isLive ? "online" : "offline";
       const isHidden = stream.visible === false;
       const visibilityIcon = isHidden ? "🚫" : "👁";
       const visibilityTitle = isHidden ? "Mostrar" : "Ocultar";
+      const platformLabel = PLATFORM_LABELS[stream.platform] || stream.platform;
 
       item.innerHTML = `
+        <span class="stream-list-item__drag" title="Arraste para reordenar">⠿</span>
         <div class="stream-list-item__info">
-          <span class="stream-list-item__name">${stream.channel}</span>
+          <span class="stream-list-item__name" title="${stream.channel}">${stream.channel}</span>
+          <span class="stream-list-item__platform">${platformLabel}</span>
           <span class="stream-list-item__status ${statusClass}">${statusLabel}</span>
           ${isHidden ? '<span class="stream-list-item__status is-offline">oculta</span>' : ""}
         </div>
@@ -911,10 +918,14 @@
           <button class="btn btn--icon btn--sm" data-action="toggle-visibility" title="${visibilityTitle}">${visibilityIcon}</button>
           <button class="btn btn--icon btn--sm" data-action="edit" title="Editar">✏️</button>
           <button class="btn btn--icon btn--sm" data-action="refresh" title="Atualizar">↻</button>
+          <button class="btn btn--icon btn--sm btn--danger" data-action="remove" title="Remover">✕</button>
         </div>
       `;
       el.streamListItems.appendChild(item);
     });
+
+    // Idempotente: só registra os listeners de arrastar uma vez.
+    layout.enableDragAndDrop(el.streamListItems, reorderStreams, ".stream-list-item");
   }
 
   el.streamListItems.addEventListener("click", (event) => {
@@ -934,15 +945,87 @@
       case "refresh":
         refreshSingleStream(id); // recria só esta stream, explicitamente
         break;
+      case "remove":
+        removeStream(id);
+        break;
       default:
         break;
     }
   });
 
   // -----------------------------------------------------------------
+  // COPIAR LISTA DE STREAMS
+  // -----------------------------------------------------------------
+  // Gera "Plataforma: canal" por linha, respeitando a ordem atual de
+  // state.streams (a mesma ordem usada no grid principal e persistida
+  // no autosave/layouts). Serve como base para um futuro "compartilhar
+  // lista" — não criamos um sistema paralelo para isso.
+  function buildStreamListText() {
+    return state.streams
+      .map((s) => `${PLATFORM_LABELS[s.platform] || s.platform}: ${s.channel}`)
+      .join("\n");
+  }
+
+  async function copyStreamList() {
+    if (state.streams.length === 0) {
+      showToast("Nenhuma stream para copiar.");
+      return;
+    }
+
+    const text = buildStreamListText();
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        throw new Error("Clipboard API indisponível");
+      }
+      onListCopied();
+    } catch (err) {
+      // Fallback para navegadores/contexto sem Clipboard API (ex.: HTTP
+      // sem TLS): textarea temporário + document.execCommand.
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+        onListCopied();
+      } catch (fallbackErr) {
+        showToast("Não foi possível copiar a lista.");
+      }
+    }
+  }
+
+  function onListCopied() {
+    showToast("✓ Lista copiada!");
+    if (!el.btnCopyList) return;
+    const original = el.btnCopyList.dataset.originalLabel || el.btnCopyList.textContent;
+    el.btnCopyList.dataset.originalLabel = original;
+    el.btnCopyList.textContent = "✓ Copiado!";
+    el.btnCopyList.classList.add("is-active");
+    clearTimeout(copyFeedbackTimeout);
+    copyFeedbackTimeout = setTimeout(() => {
+      el.btnCopyList.textContent = original;
+      el.btnCopyList.classList.remove("is-active");
+    }, 2000);
+  }
+  let copyFeedbackTimeout = null;
+
+  if (el.btnCopyList) el.btnCopyList.addEventListener("click", copyStreamList);
+
+  // -----------------------------------------------------------------
   // INICIALIZAÇÃO
   // -----------------------------------------------------------------
+  let hasInitialized = false;
+
   async function init() {
+    if (hasInitialized) return; // trava contra dupla inicialização
+    hasInitialized = true;
+
     loadSettings();
     applySettingsToUI();
 

@@ -63,17 +63,25 @@
   }
 
   /**
-   * Habilita drag and drop dentro de um container de cards. Quando o
-   * usuário solta um card sobre outro, `onReorder(draggedId, targetId)`
+   * Habilita drag and drop dentro de um container de itens. Quando o
+   * usuário solta um item sobre outro, `onReorder(draggedId, targetId)`
    * é chamado para que o app.js reordene o estado real.
+   *
+   * `itemSelector` permite reaproveitar esta função tanto para os
+   * cards de stream (".stream-card", padrão) quanto para linhas de
+   * outras listas (ex.: ".stream-list-item" no painel "Gerenciar
+   * Streams"), sem duplicar a lógica de drag and drop.
    *
    * Idempotente: pode ser chamada de novo sem duplicar listeners
    * (usamos delegação de evento no container).
    *
    * @param {HTMLElement} containerEl
    * @param {Function} onReorder
+   * @param {string} [itemSelector=".stream-card"]
    */
-  function enableDragAndDrop(containerEl, onReorder) {
+  function enableDragAndDrop(containerEl, onReorder, itemSelector) {
+    const selector = itemSelector || ".stream-card";
+
     if (containerEl.dataset.dndEnabled === "true") {
       return;
     }
@@ -82,42 +90,42 @@
     let draggedId = null;
 
     containerEl.addEventListener("dragstart", (event) => {
-      const card = event.target.closest(".stream-card");
-      if (!card) return;
-      draggedId = card.dataset.id;
-      card.classList.add("is-dragging");
+      const item = event.target.closest(selector);
+      if (!item) return;
+      draggedId = item.dataset.id;
+      item.classList.add("is-dragging");
       event.dataTransfer.effectAllowed = "move";
     });
 
     containerEl.addEventListener("dragend", (event) => {
-      const card = event.target.closest(".stream-card");
-      if (card) card.classList.remove("is-dragging");
+      const item = event.target.closest(selector);
+      if (item) item.classList.remove("is-dragging");
       containerEl
-        .querySelectorAll(".stream-card.is-drag-over")
+        .querySelectorAll(`${selector}.is-drag-over`)
         .forEach((el) => el.classList.remove("is-drag-over"));
       draggedId = null;
     });
 
     containerEl.addEventListener("dragover", (event) => {
-      const card = event.target.closest(".stream-card");
-      if (!card) return;
+      const item = event.target.closest(selector);
+      if (!item) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
-      card.classList.add("is-drag-over");
+      item.classList.add("is-drag-over");
     });
 
     containerEl.addEventListener("dragleave", (event) => {
-      const card = event.target.closest(".stream-card");
-      if (card) card.classList.remove("is-drag-over");
+      const item = event.target.closest(selector);
+      if (item) item.classList.remove("is-drag-over");
     });
 
     containerEl.addEventListener("drop", (event) => {
-      const card = event.target.closest(".stream-card");
-      if (!card) return;
+      const item = event.target.closest(selector);
+      if (!item) return;
       event.preventDefault();
-      card.classList.remove("is-drag-over");
+      item.classList.remove("is-drag-over");
 
-      const targetId = card.dataset.id;
+      const targetId = item.dataset.id;
       if (draggedId && targetId && draggedId !== targetId) {
         onReorder(draggedId, targetId);
       }

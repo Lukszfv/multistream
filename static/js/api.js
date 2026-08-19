@@ -4,11 +4,6 @@
   window.MSH = window.MSH || {};
 
   /**
-   * Resolve um canal em uma plataforma específica, consultando o
-   * backend Flask. Retorna uma Promise que resolve para o objeto
-   * padronizado:
-   *   { platform, channel, is_live, title, embed_url, thumbnail, checked_at }
-   *
    * @param {string} platform
    * @param {string} channel
    * @returns {Promise<Object>}

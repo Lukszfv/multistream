@@ -277,10 +277,6 @@ a {
   align-items: center;
 }
 
-/* Só dentro do formulário de adicionar: o wrapper .form-field vira
-   "invisível" para o layout, deixando label/campo/hint participarem
-   diretamente do grid acima (alinhados por área). O modal de edição
-   continua usando .form-field como flex-column normal. */
 .add-stream-form .form-field {
   display: contents;
 }
@@ -630,12 +626,6 @@ a {
   display: none !important;
 }
 
-/* -------------------------------------------------------------------------
-   ESTADO "OFFLINE / INDISPONÍVEL" DE UM PLAYER
-   ---------------------------------------------------------------------- */
-/* Exibido no lugar do iframe quando o backend informa que o canal não
-   está ao vivo (ou não foi encontrado) — em vez de deixar um player
-   quebrado tentando carregar silenciosamente. */
 .stream-card__status {
   display: flex;
   flex-direction: column;
@@ -664,9 +654,313 @@ a {
   margin-top: var(--gap-xs);
 }
 
-/* -------------------------------------------------------------------------
-   MODAL — EDITAR STREAM
-   ---------------------------------------------------------------------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: var(--gap-md);
+}
+
+.modal {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--gap-md);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modal__title {
+  font-weight: 600;
+  font-size: var(--font-size-md);
+}
+
+.modal__body {
+  padding: var(--gap-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-xs);
+}
+
+.layout-menu {
+  position: relative;
+}
+
+.layout-menu__dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 260px;
+  max-width: min(80vw, 300px);
+  box-sizing: border-box;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--gap-sm);
+  z-index: 250;
+}
+
+.layout-menu__title {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 8px 8px;
+}
+
+.layout-menu__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.layout-menu__item {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
+}
+
+.layout-menu__item:hover {
+  background: var(--bg-card);
+  border-color: var(--border-color);
+}
+
+.layout-menu__empty {
+  padding: 8px 10px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+.layout-menu__manage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  margin-top: var(--gap-sm);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
+}
+
+.layout-menu__manage:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.hidden-stash {
+  display: none !important;
+}
+
+.stream-card__twitch-mount {
+  width: 100%;
+  height: 100%;
+}
+.stream-card__twitch-mount iframe {
+  width: 100% !important;
+  height: 100% !important;
+  border: 0;
+  display: block;
+}
+
+.stream-card__quality-badge {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 176, 32, 0.15);
+  color: var(--warning);
+  border: 1px solid rgba(255, 176, 32, 0.35);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.stream-list-copy-btn {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: var(--gap-sm);
+}
+
+.stream-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stream-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-sizing: border-box;
+}
+
+.stream-list-item.is-dragging {
+  opacity: 0.4;
+}
+
+.stream-list-item.is-drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.stream-list-item__drag {
+  cursor: grab;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  padding: 0 2px;
+  user-select: none;
+}
+
+.stream-list-item__drag:active {
+  cursor: grabbing;
+}
+
+.stream-list-item__info {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+  flex: 1;
+}
+
+.stream-list-item__name {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.stream-list-item__platform {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.stream-list-item__status {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.stream-list-item__status.is-online {
+  background: rgba(61, 220, 132, 0.15);
+  color: var(--success);
+}
+
+.stream-list-item__status.is-offline {
+  background: rgba(139, 147, 161, 0.15);
+  color: var(--text-secondary);
+}
+
+.stream-list-item__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.stream-list-item:hover .stream-list-item__actions,
+.stream-list-item:focus-within .stream-list-item__actions {
+  opacity: 1;
+}
+
+.stream-list-item__actions .btn--icon {
+  width: 28px;
+  height: 28px;
+}
+
+.stream-list-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-md);
+  padding-top: var(--gap-md);
+  border-top: 1px solid var(--border-color);
+}
+
+.stream-card__status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-sm);
+  height: 100%;
+  width: 100%;
+  padding: var(--gap-lg);
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+
+.stream-card__status-icon {
+  font-size: 1.75rem;
+  opacity: 0.7;
+}
+
+.stream-card__status-message {
+  font-size: var(--font-size-sm);
+  max-width: 260px;
+}
+
+.stream-card__status .btn {
+  margin-top: var(--gap-xs);
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;

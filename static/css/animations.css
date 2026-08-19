@@ -121,6 +121,10 @@
   animation: fade-in-up var(--transition-base) ease forwards;
 }
 
+.layout-menu__dropdown:not(.is-hidden) {
+  animation: fade-in-up var(--transition-fast) ease forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
